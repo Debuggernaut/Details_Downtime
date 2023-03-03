@@ -1,0 +1,5 @@
+This is a plugin for the Details! damage meter addon for World of Warcraft ( https://github.com/Tercioo/Details-Damage-Meter )
+
+It measures the amount of time in the current combat encounter where you haven't been actively using an ability. This can help suss out if you're spending too much time running around, not hitting your buttons hard enough to get new spells into the spell queue window, or other issues
+
+
