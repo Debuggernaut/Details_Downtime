@@ -29,6 +29,7 @@ local Details = _G.Details
 
 EO.debug = false
 EO.lastPoll = 0
+EO.lastSpam = 0
 EO.orbID = 120651 -- Explosive
 EO.CustomDisplay = {
 	name = L["Downtime"],
@@ -38,8 +39,8 @@ EO.CustomDisplay = {
 	spellid = false,
 	target = false,
 	author = "Bernycinders-Thrall",
-	desc = L["Show how much time the current player has lost to mechanics/spacing out"],
-	script_version = 11,
+	desc = L["Cast time lost to mechanics, etc"],
+	script_version = 13,
 	script = [[
         local Combat, CustomContainer, Instance = ...
         local total, top, amount = 0, 0, 0
@@ -49,7 +50,7 @@ EO.CustomDisplay = {
             local Container = Combat:GetContainer(DETAILS_ATTRIBUTE_DAMAGE)
             for _, Actor in Container:ListActors() do
                 --Only record data for yourself
-                if Actor:guid() == UnitGUID("player")
+                if Actor:guid() == UnitGUID("player") then
                     local downtime, pct = _G.Details_Downtime:GetRecord(CombatNumber, Actor:guid())
                     CustomContainer:AddValue(Actor, downtime)
                 end
@@ -115,28 +116,31 @@ EO.CustomDisplay = {
             return _G.Details_Downtime:GetDisplayText(Combat:GetCombatNumber(), Actor.my_actor:guid())
         end
         return ""
-    ]]
+    ]],
+	percent_script = [[
+		return ""
+	]]
 }
 
 -- Public APIs
 
+local template = L["Downtime: "] .. "%.2fs"
 local displayTemplate = {
-	-- Use Short Text
+	-- keeping this around in case it's useful later
+	-- http://thecodelesscode.com/case/41
 	[true] = {
-		-- Only Show Hit
-		[true] = "%2$d",
-		[false] = "%d | %d"
+		[true] = template,
+		[false] = template
 	},
 	[false] = {
-		-- Only Show Hit
-		[true] = L["Hit: "] .. "%2$d",
-		[false] = L["Target: "] .. "%d " .. L["Hit: "] .. "%d"
+		[true] = template,
+		[false] = template
 	}
 }
 
 function Engine:GetRecord(combatID, playerGUID)
 	if EO.db[combatID] and EO.db[combatID][playerGUID] then
-		return EO.db[combatID][playerGUID].target or 0, EO.db[combatID][playerGUID].hit or 0
+		return EO.db[combatID][playerGUID].downtime or 0, EO.db[combatID][playerGUID].hit or 0
 	end
 	return 0, 0
 end
@@ -145,15 +149,15 @@ function Engine:GetDisplayText(combatID, playerGUID)
 	if EO.db[combatID] and EO.db[combatID][playerGUID] then
 		return format(
 			displayTemplate[EO.plugin.db.useShortText][EO.plugin.db.onlyShowHit],
-			EO.db[combatID][playerGUID].target or 0,
+			EO.db[combatID][playerGUID].downtime or 0,
 			EO.db[combatID][playerGUID].hit or 0
 		)
 	end
 	return format(displayTemplate[EO.plugin.db.useShortText][EO.plugin.db.onlyShowHit], 0, 0)
 end
 
-function Engine:FormatDisplayText(target, hit)
-	return format(displayTemplate[EO.plugin.db.useShortText][EO.plugin.db.onlyShowHit], target or 0, hit or 0)
+function Engine:FormatDisplayText(downtime, hit)
+	return format(displayTemplate[EO.plugin.db.useShortText][EO.plugin.db.onlyShowHit], downtime or 0, hit or 0)
 end
 
 function Engine:RequireOrbName()
@@ -175,10 +179,67 @@ function EO:ParseNPCID(unitGUID)
 	return tonumber(strmatch(unitGUID or "", "Creature%-.-%-.-%-.-%-.-%-(.-)%-") or "")
 end
 
-local function pollStatus(self)
-	if not EO.currentCombat or not EO.db[EO.currentCombat] then
+-- debug:
+-- /dump _G.Details_Downtime.Core.currentCombat.runningTotal
+
+local function spamWhenIdle()
+	local now = GetTime()
+
+	if (now - EO.lastSpam) > 2.0 then
+		print("It's",GetTime(),"  Ask yourself: Do you really want to be the kind of player who's got endless time to run out of mechanics but 'can't afford' to get in a little more DPS?")
+		EO.lastSpam = now
+	end
+end
+
+-- Runs roughly once every 100 milliseconds
+-- Will record any time period where it sees you not casting twice in a row
+local function pollStatus()
+	if not EO.currentCombat then
+		--EO.lastPoll = nil
+		--EO.wasCasting = true
+		C_Timer.After(0.1, pollStatus)
 		return
 	end
+
+	local now = GetTime()
+	local casting = true
+
+	if EO.lastPoll ~= nil then
+		if not EO.runningTotal then
+			EO.runningTotal = 0
+			EO.wasCasting = true
+			EO.lastPoll = now
+		end
+
+		local duration = now - EO.lastPoll
+
+		local spell, _, _, _, endTimeMs = UnitCastingInfo("player")
+		local gcdStart, gcdDur, _, _ = GetSpellCooldown(61304)
+
+		if (gcdStart == 0 and endTimeMs == nil) then
+			casting = false
+		end
+
+		if EO.wasCasting == true and casting == false then
+		end
+		
+		if EO.wasCasting == false and casting == true then
+			-- If you see this message, there was at least a blip where you weren't casting
+			print("Together we are going to stand up to draconic billionaires!  We will not sit idle!")
+		end
+
+		if (EO.wasCasting == false and casting == false) then
+			spamWhenIdle()
+			EO.runningTotal = EO.runningTotal + duration
+			EO:RecordDowntime(UnitGUID("player"), duration)
+		end
+
+		EO.wasCasting = casting
+
+	end
+
+	EO.lastPoll = now
+	C_Timer.After(0.1, pollStatus)
 end
 
 local function targetChanged(self, _, unitID)
@@ -195,35 +256,35 @@ local function targetChanged(self, _, unitID)
 end
 
 function EO:COMBAT_LOG_EVENT_UNFILTERED()
-	local _, subEvent, _, sourceGUID, sourceName, sourceFlag, _, destGUID = CombatLogGetCurrentEventInfo()
-	if
-		(subEvent == "SPELL_DAMAGE" or subEvent == "RANGE_DAMAGE" or subEvent == "SWING_DAMAGE" or
-			subEvent == "SPELL_PERIODIC_DAMAGE" or
-			subEvent == "SPELL_BUILDING_DAMAGE")
-	 then
-		local npcID = self:ParseNPCID(destGUID)
-		if npcID == self.orbID then
-			if bit_band(sourceFlag, COMBATLOG_OBJECT_TYPE_PET) > 0 then
-				-- source is pet, don't track guardian which is automaton
-				local Combat = Details:GetCombat(0)
-				if Combat then
-					local Container = Combat:GetContainer(_G.DETAILS_ATTRIBUTE_DAMAGE)
-					local ownerActor = select(2, Container:PegarCombatente(sourceGUID, sourceName, sourceFlag, true))
-					if ownerActor then
-						-- Details implements two cache method of pet and its owner,
-						-- one is in parser which is shared inside parser (damage_cache_petsOwners),
-						-- it will be wiped in :ClearParserCache, but I have no idea when,
-						-- the other is in container,
-						-- which :PegarCombatente will try to fetch owner from it first,
-						-- so in this case, simply call :PegarCombatente and use its cache,
-						-- and no need to implement myself like parser
-						sourceGUID = ownerActor:guid()
-					end
-				end
-			end
-			EO:RecordHit(sourceGUID, destGUID)
-		end
-	end
+	-- local _, subEvent, _, sourceGUID, sourceName, sourceFlag, _, destGUID = CombatLogGetCurrentEventInfo()
+	-- if
+	-- 	(subEvent == "SPELL_DAMAGE" or subEvent == "RANGE_DAMAGE" or subEvent == "SWING_DAMAGE" or
+	-- 		subEvent == "SPELL_PERIODIC_DAMAGE" or
+	-- 		subEvent == "SPELL_BUILDING_DAMAGE")
+	--  then
+	-- 	local npcID = self:ParseNPCID(destGUID)
+	-- 	if npcID == self.orbID then
+	-- 		if bit_band(sourceFlag, COMBATLOG_OBJECT_TYPE_PET) > 0 then
+	-- 			-- source is pet, don't track guardian which is automaton
+	-- 			local Combat = Details:GetCombat(0)
+	-- 			if Combat then
+	-- 				local Container = Combat:GetContainer(_G.DETAILS_ATTRIBUTE_DAMAGE)
+	-- 				local ownerActor = select(2, Container:PegarCombatente(sourceGUID, sourceName, sourceFlag, true))
+	-- 				if ownerActor then
+	-- 					-- Details implements two cache method of pet and its owner,
+	-- 					-- one is in parser which is shared inside parser (damage_cache_petsOwners),
+	-- 					-- it will be wiped in :ClearParserCache, but I have no idea when,
+	-- 					-- the other is in container,
+	-- 					-- which :PegarCombatente will try to fetch owner from it first,
+	-- 					-- so in this case, simply call :PegarCombatente and use its cache,
+	-- 					-- and no need to implement myself like parser
+	-- 					sourceGUID = ownerActor:guid()
+	-- 				end
+	-- 			end
+	-- 		end
+	-- 		EO:RecordHit(sourceGUID, destGUID)
+	-- 	end
+	-- end
 end
 
 function EO:RecordDowntime(unitGUID, downtimeDuration)
@@ -243,15 +304,15 @@ function EO:RecordDowntime(unitGUID, downtimeDuration)
 	self.db[self.currentCombat][unitGUID].downtime =
 		(self.db[self.currentCombat][unitGUID].downtime or 0) + downtimeDuration
 
-	-- update overall
-	if not self.db[self.overall] then
-		self.db[self.overall] = {}
-	end
-	if not self.db[self.overall][unitGUID] then
-		self.db[self.overall][unitGUID] = {}
-	end
+	-- -- update overall
+	-- if not self.db[self.overall] then
+	-- 	self.db[self.overall] = {}
+	-- end
+	-- if not self.db[self.overall][unitGUID] then
+	-- 	self.db[self.overall][unitGUID] = {}
+	-- end
 
-	self.db[self.overall][unitGUID].downtime = (self.db[self.overall][unitGUID].downtime or 0) + downtimeDuration
+	-- self.db[self.overall][unitGUID].downtime = (self.db[self.overall][unitGUID].downtime or 0) + downtimeDuration
 end
 
 function EO:RecordHit(unitGUID, targetGUID)
@@ -282,14 +343,15 @@ function EO:OnDetailsEvent(event, combat)
 		if not EO.currentCombat or not EO.db[EO.currentCombat] then
 			return
 		end
-		for _, list in pairs(EO.db[EO.currentCombat]) do
-			for key in pairs(list) do
-				if key ~= "target" and key ~= "hit" then
-					list[key] = nil
-				end
-			end
-		end
+		-- for _, list in pairs(EO.db[EO.currentCombat]) do
+		-- 	for key in pairs(list) do
+		-- 		if key ~= "target" and key ~= "hit" then
+		-- 			list[key] = nil
+		-- 		end
+		-- 	end
+		-- end
 		EO.db[EO.currentCombat].runID = select(2, combat:IsMythicDungeon())
+		EO.currentCombat = nil
 	elseif event == "DETAILS_DATA_RESET" then
 		EO:Debug("DETAILS_DATA_RESET")
 	--EO.overall = Details:GetCombat(-1):GetCombatNumber()
@@ -433,6 +495,8 @@ function EO:OnInitialize()
 
 	--self:RegisterEvent('PLAYER_ENTERING_WORLD', 'CheckAffix')
 	--self:RegisterEvent('CHALLENGE_MODE_START', 'CheckAffix')
+
+	pollStatus()
 
 	self:InstallPlugin()
 end
