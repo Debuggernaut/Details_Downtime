@@ -27,6 +27,13 @@ local Details = _G.Details
 
 -- GLOBALS: ExplosiveOrbsLog
 
+
+--Seconds between print messages
+EO.PRINT_SPAM_COOLDOWN = 1.0
+
+--Time it'll spam while you're idle before leaving you alone
+EO.SPAM_TIME_LIMIT = 2.5
+
 EO.debug = false
 EO.lastPoll = 0
 EO.lastSpam = 0
@@ -185,10 +192,37 @@ end
 local function spamWhenIdle()
 	local now = GetTime()
 
-	if (now - EO.lastSpam) > 2.0 then
+	if (EO.lastStoppedCasting == nil) then
+		return
+	end
+
+	if (now - EO.lastStoppedCasting) > EO.SPAM_TIME_LIMIT then
+		return
+	end
+
+	if (now - EO.lastSpam) > EO.PRINT_SPAM_COOLDOWN then
 		print("It's",GetTime(),"  Ask yourself: Do you really want to be the kind of player who's got endless time to run out of mechanics but 'can't afford' to get in a little more DPS?")
 		EO.lastSpam = now
 	end
+end
+
+function Details_Downtime_Casting()
+	local casting = true
+
+	local spell, _, _, _, endTimeMs = UnitCastingInfo("player")
+	local gcdStart, gcdDur, _, _ = GetSpellCooldown(61304)
+
+	if (gcdStart == 0 and endTimeMs == nil) then
+		casting = false
+	end
+
+	return casting;
+end
+
+function Details_Downtime_CheckIdle(threshold)
+	local casting = Details_Downtime_Casting()
+
+	return (GetTime() - EO.lastStoppedCasting) > threshold
 end
 
 -- Runs roughly once every 100 milliseconds
@@ -213,19 +247,15 @@ local function pollStatus()
 
 		local duration = now - EO.lastPoll
 
-		local spell, _, _, _, endTimeMs = UnitCastingInfo("player")
-		local gcdStart, gcdDur, _, _ = GetSpellCooldown(61304)
-
-		if (gcdStart == 0 and endTimeMs == nil) then
-			casting = false
-		end
+		casting = Details_Downtime_Casting()
 
 		if EO.wasCasting == true and casting == false then
+			EO.lastStoppedCasting = now
 		end
 		
 		if EO.wasCasting == false and casting == true then
 			-- If you see this message, there was at least a blip where you weren't casting
-			print("Together we are going to stand up to draconic billionaires!  We will not sit idle!")
+			--print("Together we are going to stand up to draconic billionaires!  We will not sit idle!")
 		end
 
 		if (EO.wasCasting == false and casting == false) then
