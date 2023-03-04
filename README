@@ -2,4 +2,6 @@ This is a plugin for the Details! damage meter addon for World of Warcraft ( htt
 
 It measures the amount of time in the current combat encounter where you haven't been actively using an ability. This can help suss out if you're spending too much time running around, not hitting your buttons hard enough to get new spells into the spell queue window, or other issues
 
+TellMeWhen string that uses the CheckIdle function to play a sound effect when you've spent long enough not casting that you should have used a movement speed effect:
 
+^1^T^SType^Sconditionicon ^SConditions^T ^N1^T ^SType^SLUA ^SName^Slocal~`shown~`=~`false~J if~`(Details_Downtime_CheckIdle~`~|=~`nil)~`then~J ~`~`~`~`shown~`=~`Details_Downtime_CheckIdle(1.4)~J end~J return~`shown ^t^N2^T ^SType^SHEALTH ^SOperator^S> ^SUnit^Starget ^SLevel^N30 ^t^N3^T ^SType^SREACT ^SUnit^Starget ^SLevel^N1 ^t^N4^T ^SType^SCOMBAT ^t^Sn^N4 ^t^SEvents^T ^N1^T ^SType^SSound ^SSound^SInterface/CustomSounds/doh.mp3 ^SEvent^SOnShow ^t^Sn^N1 ^t^SCustomTex^S135372 ^SEnabled^B ^t^N100900^S~`~| ^Sicon^^

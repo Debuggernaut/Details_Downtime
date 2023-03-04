@@ -222,7 +222,15 @@ end
 function Details_Downtime_CheckIdle(threshold)
 	local casting = Details_Downtime_Casting()
 
-	return (GetTime() - EO.lastStoppedCasting) > threshold
+	if (EO.lastStoppedCasting == nil) then
+		return false
+	end
+
+	if (casting ~= true) then
+		return (GetTime() - EO.lastStoppedCasting) > threshold
+	else
+		return false
+	end
 end
 
 -- Runs roughly once every 100 milliseconds
