@@ -211,14 +211,17 @@ function Details_Downtime_Casting()
 
 	local spell, _, _, _, endTimeMs = UnitCastingInfo("player")
 	local gcdStart, gcdDur, _, _ = GetSpellCooldown(61304)
+	local _,_,_,_, channelEndMs = UnitChannelInfo("player")
 
-	if (gcdStart == 0 and endTimeMs == nil) then
+	if (gcdStart == 0 and endTimeMs == nil and channelEndMs == nil) then
 		casting = false
 	end
 
 	return casting;
 end
 
+--Returns true if you haven't cast in a number of seconds
+-- equal to threshold
 function Details_Downtime_CheckIdle(threshold)
 	local casting = Details_Downtime_Casting()
 
@@ -262,6 +265,7 @@ local function pollStatus()
 		end
 		
 		if EO.wasCasting == false and casting == true then
+			EO.lastStoppedCasting = nil
 			-- If you see this message, there was at least a blip where you weren't casting
 			--print("Together we are going to stand up to draconic billionaires!  We will not sit idle!")
 		end
